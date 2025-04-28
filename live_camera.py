@@ -23,9 +23,6 @@ REFERENCE_POINTS = np.array([
     [70.7299, 92.2041]
 ], dtype = np.float32)
 
-BLURRY_THRESHOLD = 60
-DETECTION_THRESHOLD = 0.5
-MIN_TRACK_AGE = 5
 LANDMARK_INDICES = [33, 263, 1, 61, 291]
 
 class FPSCounter:
@@ -172,7 +169,7 @@ def is_small_face(x1, y1, x2, y2, min_face_size):
     h = y2 - y1
     return w < min_face_size or h < min_face_size
 
-def is_blurry_face(image, blurry_threshold = BLURRY_THRESHOLD):
+def is_blurry_face(image, blurry_threshold):
     """
     Check if the cropped face image is too blurry based on Laplacian variance.
     Args:
@@ -280,60 +277,131 @@ def align_face(face, landmarks, landmark_indices = LANDMARK_INDICES):
     return aligned_face
 
 def pad_to_square(image, border_value = 0):
+    """
+    Pad an image to make it square by adding borders.
+    Args:
+        image (np.ndarray): Input image of shape (H, W, C) or (H, W).
+        border_value (int or tuple, optional): Color value for the padding. Default is 0 (black).
+    Returns:
+        np.ndarray: Padded square image.
+    """
     h, w = image.shape[:2]
     size = max(h, w)
+
+    # Padding amounts
     delta_w = size - w
     delta_h = size - h
-    top, bottom = delta_h // 2, delta_h - delta_h // 2
-    left, right = delta_w // 2, delta_w - delta_w // 2
-    padded = cv2.copyMakeBorder(image, top, bottom, left, right, cv2.BORDER_CONSTANT, value = border_value)
-    return padded
+    top = delta_h // 2
+    bottom = delta_h - top
+    left = delta_w // 2
+    right = delta_w - left
 
-def process_single_face(face_crop, face_mesh, min_face_size, target_size = 192):
+    padded_image = cv2.copyMakeBorder(
+        image, top, bottom, left, right, 
+        borderType=cv2.BORDER_CONSTANT, value=border_value
+    )
+    return padded_image
+
+def process_single_face(face_crop, face_mesh, min_face_size, blurry_threshold, target_size = 192):
+    """
+    Preprocess a single cropped face for face recognition:
+    - Validate size and sharpness.
+    - Pad to square.
+    - Resize to target size.
+    - Detect facial landmarks.
+    - Align based on landmarks.
+    - Normalize to a tensor.
+    
+    Args:
+        face_crop (np.ndarray): Cropped face image (BGR).
+        face_mesh (mp.solutions.face_mesh.FaceMesh): MediaPipe face landmark detector.
+        min_face_size (int): Minimum acceptable face dimension (width/height).
+        target_size (int, optional): Target maximum size for the longest side before landmarking. Default is 192.
+    
+    Returns:
+        torch.Tensor or None: Preprocessed face tensor (shape [3, 112, 112]), or None if preprocessing fails.
+    """
+
     if face_crop.size == 0:
         return None
-    
-    if is_small_face(0, 0, face_crop.shape[1], face_crop.shape[0], min_face_size = min_face_size):
+    if is_small_face(0, 0, face_crop.shape[1], face_crop.shape[0], min_face_size):
         return None
-    
-    if is_blurry_face(face_crop):
+    if is_blurry_face(face_crop, blurry_threshold = blurry_threshold):
         return None
-    
+
+    # Pad to square shape for MediaPipe
     face_crop = pad_to_square(face_crop)
     
     h, w = face_crop.shape[:2]
     scale = target_size / max(h, w)
-    resized_w, resized_h = int(w * scale), int(h * scale)
-    resized_face = cv2.resize(face_crop, (resized_w, resized_h), interpolation = cv2.INTER_AREA)
-    
+    resized_face = cv2.resize(face_crop, (int(w * scale), int(h * scale)), interpolation = cv2.INTER_AREA)
+
+    # Convert to RGB for MediaPipe
     face_rgb = cv2.cvtColor(resized_face, cv2.COLOR_BGR2RGB)
     results = face_mesh.process(face_rgb)
-    
+
+    # Landmark detection and alignment
     if results.multi_face_landmarks:
         for face_landmarks in results.multi_face_landmarks:
             aligned_face = align_face(resized_face, face_landmarks.landmark)
             if aligned_face is not None:
                 return prepare_face_tensor(aligned_face)
-    
+
     return None
 
+
 def draw_face_info(frame, track_id, identity, similarity, box):
+    """
+    Draw bounding box and identity label around a detected face.
+    
+    Args:
+        frame (np.ndarray): Frame to draw on (BGR).
+        track_id (int): Tracker ID assigned to the face.
+        identity (str): Recognized identity name or "Stranger".
+        similarity (float): Cosine similarity score with face bank.
+        box (tuple): Bounding box coordinates (x1, y1, x2, y2).
+    """
     x1, y1, x2, y2 = box
-    color = (0, 0, 255) if identity == "Stranger" else(0, 255, 0)
+
+    color = (0, 0, 255) if identity == "Stranger" else (0, 255, 0)
     label = f"ID: {track_id} | Identity: {identity} | Sim: {similarity:.2f}"
-    
-    (text_width, _), _ = cv2.getTextSize(text = label, fontFace = cv2.FONT_HERSHEY_SIMPLEX, fontScale = 0.8, thickness = 2)
-    
-    cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-    
+
+    # Measure text width for centering
+    (text_width, _), _ = cv2.getTextSize(
+        label, 
+        fontFace = cv2.FONT_HERSHEY_SIMPLEX, 
+        fontScale = 0.8,
+        thickness=2)
+
+
+    # Center text above the bounding box
     center_x = (x1 + x2) // 2
     text_x = center_x - (text_width // 2)
     text_y = max(0, y1 - 10)
     
-    cv2.putText(frame, label, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2, cv2.LINE_AA)
+    cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness = 2)
+
+    cv2.putText(frame, 
+                label, 
+                (text_x, text_y), 
+                fontFace = cv2.FONT_HERSHEY_SIMPLEX, 
+                fontScale = 0.8, 
+                color = color, 
+                thickness = 2, 
+                lineType = cv2.LINE_AA)
     
 
 def prepare_frame(frame, detector_result, args, face_mesh):
+    """
+    Prepare aligned face crops, track IDs, and bounding boxes from detection results.
+    Args:
+        frame (np.ndarray): Original video frame (BGR).
+        detector_result: YOLO detector output for the current frame.
+        args (Namespace): Parsed arguments containing thresholds and settings.
+        face_mesh: Initialized MediaPipe FaceMesh for landmark detection.
+    Returns:
+        tuple: (aligned_faces, track_ids, bounding_boxes) if faces found, else None.
+    """
     boxes = detector_result.boxes
     
     if not boxes:
@@ -344,6 +412,7 @@ def prepare_frame(frame, detector_result, args, face_mesh):
     bounding_boxes = []
     
     for box in boxes:
+        # Extract track ID (if available) and detection confidence
         track_id = int(box.id[0]) if box.id is not None else None
         x1, y1, x2, y2 = map(int, box.xyxy[0])
         conf = float(box.conf[0])
@@ -355,9 +424,10 @@ def prepare_frame(frame, detector_result, args, face_mesh):
         y1 = max(0, y1)
         x2 = min(detector_result.orig_shape[1], x2)
         y2 = min(detector_result.orig_shape[0], y2)
-
+        
+        # Crop face region and preprocess
         face_crop = frame[y1:y2, x1:x2]
-        aligned = process_single_face(face_crop, face_mesh, min_face_size=args.min_face_size)
+        aligned = process_single_face(face_crop, face_mesh, min_face_size = args.min_face_size, blurry_threshold = args.blurry_threshold)
 
         if aligned is not None:
             aligned_faces.append(aligned)
@@ -457,6 +527,12 @@ def parse_args():
         type = float,
         default = 0.5,
         help = "Face recognition similarity threshold (default: 0.5)."
+    )
+    parser.add_argument(
+        "--blurry-threshold",
+        type = float,
+        default = 60.0,
+        help = "Laplacian variance threshold for blur detection (default: 60.0). Lower values allow blurrier faces."
     )
 
     # Tracker settings
