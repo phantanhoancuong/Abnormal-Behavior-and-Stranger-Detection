@@ -1,0 +1,16 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.so
+
+# VS Code config
+.vscode/
+
+# Logs and runtime
+*.log
+
+# Output videos from detection scripts
+*.mp4
+
+# Face bank data
+data/face_banks/
