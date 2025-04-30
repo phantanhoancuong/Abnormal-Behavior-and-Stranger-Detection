@@ -1,6 +1,7 @@
 import torch
 import cv2
 import sys
+from contextlib import ExitStack
 
 from face_system import (
     FaceBank,
@@ -34,72 +35,75 @@ def main():
     detection_result_gen = face_detector.get_result_generator(source)
     face_tracker = FaceTracker(recognize_threshold=args.rec_threshold)
     fps_counter = FPSCounter(smoothing=args.fps_smoothing)
-    face_mesh = FaceMesh()
-    face_processor = FaceProcessor(
-        face_mesh=face_mesh,
-        min_face_size=args.min_face_size,
-        det_threshold=args.det_threshold,
-        blurry_threshold=args.blurry_threshold,
-    )
+
     info_overlay = InfoOverlay()
 
-    video_writer = None
-
-    for detection_result in detection_result_gen:
-        fps_counter.update()
-        face_tracker.increment_frame()
-
-        frame = detection_result.orig_img
-
-        if video_writer is None and args.save_video:
-            video_writer = VideoWriter(
-                output_path=args.output_path, frame_size=frame.shape[:2]
-            )
-
-        faces_info = face_processor.process_frame(
-            frame=frame,
-            detection_result=detection_result,
+    with ExitStack() as stack:
+        video_writer = None
+        face_mesh = stack.enter_context(FaceMesh())
+        face_processor = FaceProcessor(
+            face_mesh=face_mesh,
+            min_face_size=args.min_face_size,
+            det_threshold=args.det_threshold,
+            blurry_threshold=args.blurry_threshold,
         )
 
-        if faces_info:
-            aligned_faces, track_ids, bounding_boxes = faces_info
+        for detection_result in detection_result_gen:
+            fps_counter.update()
+            face_tracker.increment_frame()
 
-            if aligned_faces:
-                embeddings = face_recognizer.recognize_batch(aligned_faces)
-                for emb, tid, box in zip(embeddings, track_ids, bounding_boxes):
-                    identity, sim = face_bank.match_face(
-                        embedding=emb, threshold=args.rec_threshold
+            frame = detection_result.orig_img
+
+            if video_writer is None and args.save_video:
+                video_writer = stack.enter_context(
+                    VideoWriter(
+                        output_path=args.output_path, frame_size=frame.shape[:2]
                     )
+                )
 
-                    face_tracker.update(track_id=tid, identity=identity, similarity=sim)
-                    if face_tracker.get_age(tid) < args.min_track_age:
-                        continue
-                    persistent_identity = face_tracker.get_identity(track_id=tid)
-                    info_overlay.overlay_identity(
-                        frame=frame,
-                        track_id=tid,
-                        identity=persistent_identity,
-                        similarity=sim,
-                        box=box,
-                    )
-        if args.show_fps:
-            info_overlay.overlay_fps(frame=frame, fps=fps_counter.get_fps())
+            faces_info = face_processor.process_frame(
+                frame=frame,
+                detection_result=detection_result,
+            )
 
-        if args.save_video and video_writer is not None:
-            video_writer.write(frame)
+            if faces_info:
+                aligned_faces, track_ids, bounding_boxes = faces_info
 
-        cv2.imshow("Face Detection + Recognition", frame)
+                if aligned_faces:
+                    embeddings = face_recognizer.recognize_batch(aligned_faces)
+                    for emb, tid, box in zip(embeddings, track_ids, bounding_boxes):
+                        identity, sim = face_bank.match_face(
+                            embedding=emb, threshold=args.rec_threshold
+                        )
 
-        face_tracker.cleanup(max_inactive_frames=args.max_inactive_frames)
+                        face_tracker.update(
+                            track_id=tid, identity=identity, similarity=sim
+                        )
+                        if face_tracker.get_age(tid) < args.min_track_age:
+                            continue
+                        persistent_identity = face_tracker.get_identity(track_id=tid)
+                        info_overlay.overlay_identity(
+                            frame=frame,
+                            track_id=tid,
+                            identity=persistent_identity,
+                            similarity=sim,
+                            box=box,
+                        )
+            if args.show_fps:
+                info_overlay.overlay_fps(frame=frame, fps=fps_counter.get_fps())
 
-        if cv2.waitKey(1) == ord("q"):
-            break
+            if args.save_video and video_writer is not None:
+                video_writer.write(frame)
 
-    if args.save_video and video_writer is not None:
-        video_writer.release()
-    face_mesh.close()
-    cv2.destroyAllWindows()
-    sys.exit(0)
+            cv2.imshow("Face Detection + Recognition", frame)
+
+            face_tracker.cleanup(max_inactive_frames=args.max_inactive_frames)
+
+            if cv2.waitKey(1) == ord("q"):
+                break
+
+        cv2.destroyAllWindows()
+        sys.exit(0)
 
 
 if __name__ == "__main__":

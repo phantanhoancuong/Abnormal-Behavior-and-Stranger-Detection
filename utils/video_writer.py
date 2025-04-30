@@ -23,3 +23,9 @@ class VideoWriter:
         if self.writer is not None:
             self.writer.release()
             self.writer = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, trackback):
+        self.release()
