@@ -1,15 +1,14 @@
 # Core dependencies
 torch==2.7.0+cu118
-numpy==2.1.2
-tqdm==4.65.2
+numpy==1.24.4           # Downgraded to match ultralytics and mediapipe compatibility
+tqdm==4.67.1             # Upgraded to patch CVE-2024-34062
 pandas==2.2.3
 scikit-learn==1.6.1
 
 # Computer vision
-opencv-python==4.7.0.72
+opencv-python==4.11.0.86         # Upgraded to patch CVE-2023-4863
 opencv-contrib-python==4.11.0.86
 mediapipe==0.10.21
 
 # Face detection and tracking
 ultralytics==8.3.111
-
