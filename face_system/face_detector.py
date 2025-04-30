@@ -1,6 +1,4 @@
 from ultralytics import YOLO
-import numpy as np
-import cv2
 
 
 class FaceDetector:

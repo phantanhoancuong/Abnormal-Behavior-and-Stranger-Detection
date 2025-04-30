@@ -1,0 +1,15 @@
+# Core dependencies
+torch==2.7.0+cu118
+numpy==2.1.2
+tqdm==4.65.2
+pandas==2.2.3
+scikit-learn==1.6.1
+
+# Computer vision
+opencv-python==4.7.0.72
+opencv-contrib-python==4.11.0.86
+mediapipe==0.10.21
+
+# Face detection and tracking
+ultralytics==8.3.111
+

@@ -1,7 +1,5 @@
 import torch
 import torch.nn.functional as F
-import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
 
 
 class FaceRecognizer:
