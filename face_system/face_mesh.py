@@ -24,7 +24,7 @@ class FaceMesh:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        if exc_type:
+        if exc_type is not SystemExit:
             logging.error(
                 "Exception occurred in FaceMesh context manager",
                 exc_info=(exc_type, exc_value, traceback),

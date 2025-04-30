@@ -44,9 +44,9 @@ class VideoWriter:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        if exc_type:
+        if exc_type and exc_type is not SystemExit:
             logging.error(
-                "Exception occured in VideoWriter context manager",
+                "Exception occurred in VideoWriter context manager",
                 exc_info=(exc_type, exc_value, traceback),
             )
         self.release()

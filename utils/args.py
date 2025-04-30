@@ -134,7 +134,7 @@ def parse_args():
     parser.add_argument(
         "--log-file",
         type=str,
-        defailt="app.log",
+        default="app.log",
         help="Path to the log file (only used if destination is 'file' or 'both') (default: app.log).",
     )
 

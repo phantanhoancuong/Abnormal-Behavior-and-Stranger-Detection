@@ -119,9 +119,10 @@ def main():
                             )
 
                             if is_new_identity:
+                                track_id_str = tid if tid is not None else "None"
                                 logging.info(
-                                    "Track ID %d: Identity='%s', Similarity=%.4f",
-                                    tid,
+                                    "Track ID %s: Identity='%s', Similarity=%.4f",
+                                    track_id_str,
                                     identity,
                                     sim,
                                 )
@@ -159,7 +160,6 @@ def main():
                     break
 
             cv2.destroyAllWindows()
-            logging.info("Application terminated gracefully")
             sys.exit(0)
 
     except Exception:
