@@ -87,14 +87,40 @@ python live_camera.py \
 - `--face-detector`: Path to the YOLOv11 face detection model.
 - `--face-recognizer`: Name of the face recognition model (e.g., `edgeface_s_gamma_05`).
 - `--tracker-config`: Path to the ByteTrack config YAML file.
-- `--source`: Input source for the video stream (0 for webcam).
+- `--source`: Input source for the video stream (e.g., `0` for webcam).
 - `--rec-threshold`: Cosine similarity threshold for recognizing faces.
 - `--min-face-size`: Minimum face size to accept for recognition.
 - `--blurry-threshold`: Laplacian variance threshold to filter blurry faces.
 - `--min-track-age`: Minimum age in frames before a tracked face is displayed.
-- `--show-fps`: Show FPS on screen (True/False).
-- `--save-video`: Whether to save the output video.
-- `--output-path`: Path to save the output video.
+- `--show-fps`: Overlay FPS counter on screen (flag).
+- `--save-video`: Save the output video to disk (flag).
+- `--output-path`: Path to save the output video file.
+- `--fps-smoothing`: Frame window size to smooth the FPS estimate.
+- `--log`: Enable logging (optional flag).
+- `--log-destination`: Where to log: `terminal`, `file`, or `both`. Default is `terminal`.
+- `--log-file`: Path to the log file if destination includes `file`. Default: `app.log`.
+
+---
+
+## Logging Options
+
+You can optionally enable logging to track runtime behavior.
+
+### CLI Examples
+
+```bash
+# No logging (default)
+python live_camera.py
+
+# Log to terminal
+python live_camera.py --log
+
+# Log to file only
+python live_camera.py --log --log-destination file
+
+# Log to both terminal and file
+python live_camera.py --log --log-destination both --log-file logs/session1.log
+```
 
 ---
 
@@ -103,3 +129,4 @@ python live_camera.py \
 - Real-time performance tested on RTX 2060 with ~20–30 FPS
 - Easily extensible: replace recognizer, detector, or add external tracking (e.g., DeepSORT)
 - Use `torch.hub.load()` to fetch EdgeFace at runtime (no pip install needed)
+

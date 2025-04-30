@@ -118,4 +118,24 @@ def parse_args():
         help="Number of frames over which FPS is averaged (default: 30).",
     )
 
+    # Logging control
+    parser.add_argument(
+        "--log",
+        action="store_true",
+        help="Enabled logging (default: disabled).",
+    )
+    parser.add_argument(
+        "--log-destination",
+        type=str,
+        choices=["terminal", "file", "both"],
+        default="terminal",
+        help="Where to send log output if logging is enabled: 'terminal', 'file' or 'both' (default: terminal).",
+    )
+    parser.add_argument(
+        "--log-file",
+        type=str,
+        defailt="app.log",
+        help="Path to the log file (only used if destination is 'file' or 'both') (default: app.log).",
+    )
+
     return parser.parse_args()
