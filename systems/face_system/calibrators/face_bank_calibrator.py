@@ -4,7 +4,7 @@ import numpy as np
 import cv2
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from typing import List, Tuple, Optional, Dict
+from typing import List, Optional, Dict, Tuple
 from sklearn.metrics import (
     confusion_matrix,
     accuracy_score,
@@ -18,6 +18,10 @@ from systems.face_system.face_model.face_model import FaceModel
 
 
 class FaceBankCalibrator:
+    """
+    Calibrates and sweeps the threshold for open-set face bank search.
+    """
+
     def __init__(
         self,
         model: FaceModel,
@@ -50,6 +54,7 @@ class FaceBankCalibrator:
         self.face_bank = FaceBank(model=model, bank_path=bank_path)
 
     def _get_valid_ids(self, root: str, min_images: int) -> List[str]:
+        """Return IDs (folders) with at least min_images images."""
         return [
             d
             for d in os.listdir(root)
@@ -58,6 +63,9 @@ class FaceBankCalibrator:
         ]
 
     def build_face_bank(self) -> None:
+        """
+        Build and save the face bank from the known_dir.
+        """
         min_images = self.images_per_identity + self.probe_images_per_identity
         all_ids = self._get_valid_ids(self.known_dir, min_images)
         selected_ids = random.sample(
@@ -86,11 +94,19 @@ class FaceBankCalibrator:
 
     def evaluate(
         self,
-        log_path: Optional[str] = "log/face_bank_threshold/openset_sweep_log.txt",
-        return_result: bool = False,
-    ) -> Optional[Dict[str, float]]:
+        log_file: Optional[str] = None,
+        plot_file: Optional[str] = None,
+    ) -> Dict[str, float]:
+        """
+        Sweep thresholds, evaluate on probes, and (optionally) save log/plot.
+
+        Args:
+            log_file (str, optional): Where to save sweep log (tab separated, one line per threshold).
+            plot_file (str, optional): Where to save the threshold sweep plot.
+        """
         y_true, y_scores = [], []
 
+        # Probing known IDs
         for identity in tqdm(self.face_bank.labels, desc="Probing knowns"):
             person_path = os.path.join(self.known_dir, identity)
             image_files = sorted(os.listdir(person_path))[
@@ -110,13 +126,13 @@ class FaceBankCalibrator:
                 y_true.append(1)
                 y_scores.append(score)
 
+        # Probing strangers
         stranger_ids = self._get_valid_ids(
             self.unknown_dir, self.probe_images_per_identity
         )
         selected_strangers = random.sample(
             stranger_ids, min(self.max_identities_unknown, len(stranger_ids))
         )
-
         for identity in tqdm(selected_strangers, desc="Probing strangers"):
             person_path = os.path.join(self.unknown_dir, identity)
             image_files = sorted(os.listdir(person_path))[
@@ -135,93 +151,107 @@ class FaceBankCalibrator:
                 y_true.append(0)
                 y_scores.append(score)
 
-        return self._sweep_thresholds(y_true, y_scores, log_path, return_result)
+        result, log_lines = self._sweep_thresholds(y_true, y_scores)
 
-    def _sweep_thresholds(
-        self,
-        y_true: List[int],
-        y_scores: List[float],
-        log_path: Optional[str],
-        return_result: bool,
-    ) -> Optional[Dict[str, float]]:
-        best_acc, best_idx = 0.0, 0
-
-        if log_path:
-            log_dir = os.path.dirname(log_path)
+        if log_file is not None:
+            log_dir = os.path.dirname(log_file)
             if log_dir:
                 os.makedirs(log_dir, exist_ok=True)
-            log_f = open(log_path, "w")
-            log_f.write("THRESH\tACC\tPREC\tREC\tF1\tFAR\tFRR\n")
-        else:
-            log_f = None
+            with open(log_file, "w") as f:
+                f.write("THRESH\tACC\tPREC\tREC\tF1\tFAR\tFRR\n")
+                for line in log_lines:
+                    f.write(line)
 
-        for i, thr in enumerate(self.thresholds):
-            y_pred = [int(score >= thr) for score in y_scores]
-            tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
-            acc = accuracy_score(y_true, y_pred)
-            prec = precision_score(y_true, y_pred)
-            rec = recall_score(y_true, y_pred)
-            f1 = f1_score(y_true, y_pred)
-            far = fp / (fp + tn) if (fp + tn) > 0 else 0.0
-            frr = fn / (fn + tp) if (fn + tp) > 0 else 0.0
-
-            if acc > best_acc:
-                best_acc, best_idx = acc, i
-
-            if log_f:
-                log_f.write(
-                    f"{thr:.4f}\t{acc:.4f}\t{prec:.4f}\t{rec:.4f}\t{f1:.4f}\t{far:.4f}\t{frr:.4f}\n"
-                )
-
-        if log_f:
-            log_f.close()
-
-        self._plot_results(log_path)
-
-        result = {
-            "threshold": self.thresholds[best_idx],
-            "accuracy": best_acc,
-            "precision": precision_score(
-                y_true, [int(s >= self.thresholds[best_idx]) for s in y_scores]
-            ),
-            "recall": recall_score(
-                y_true, [int(s >= self.thresholds[best_idx]) for s in y_scores]
-            ),
-            "f1": f1_score(
-                y_true, [int(s >= self.thresholds[best_idx]) for s in y_scores]
-            ),
-            "far": fp / (fp + tn) if (fp + tn) > 0 else 0.0,
-            "frr": fn / (fn + tp) if (fn + tp) > 0 else 0.0,
-        }
+        if plot_file is not None:
+            self._plot_results_from_lines(log_lines, plot_file)
 
         print("\n[BEST THRESHOLD RESULTS]")
         for k, v in result.items():
             print(f"{k.capitalize()}: {v:.4f}")
 
-        return result if return_result else None
+        return result
+
+    def _sweep_thresholds(
+        self,
+        y_true: List[int],
+        y_scores: List[float],
+    ) -> Tuple[Dict[str, float], List[str]]:
+        """
+        Returns (best_result_dict, log_lines).
+        """
+        best_acc, best_idx = 0.0, 0
+        log_lines = []
+        best_stats = {}
+
+        for i, thr in enumerate(self.thresholds):
+            y_pred = [int(score >= thr) for score in y_scores]
+            tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+            acc = accuracy_score(y_true, y_pred)
+            prec = precision_score(y_true, y_pred, zero_division=0)
+            rec = recall_score(y_true, y_pred, zero_division=0)
+            f1 = f1_score(y_true, y_pred, zero_division=0)
+            far = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+            frr = fn / (fn + tp) if (fn + tp) > 0 else 0.0
+
+            log_lines.append(
+                f"{thr:.4f}\t{acc:.4f}\t{prec:.4f}\t{rec:.4f}\t{f1:.4f}\t{far:.4f}\t{frr:.4f}\n"
+            )
+
+            if acc > best_acc:
+                best_acc, best_idx = acc, i
+                best_stats = {
+                    "threshold": thr,
+                    "accuracy": acc,
+                    "precision": prec,
+                    "recall": rec,
+                    "f1": f1,
+                    "far": far,
+                    "frr": frr,
+                }
+
+        return best_stats, log_lines
 
     @staticmethod
-    def load_best_threshold_from_log(log_path: str) -> float:
+    def load_best_thresholds_from_log(log_file: str) -> Dict[str, float]:
         """
-        Loads the best threshold (with highest accuracy) from the sweep log file.
+        Loads the best threshold/metrics (highest accuracy) from a sweep log file.
 
         Args:
-            log_path (str): Path to the threshold sweep log file.
-
-        Returns:
-            float: Best threshold value.
+            log_file (str): Path to the threshold sweep log file.
         """
-        data = np.loadtxt(log_path, skiprows=1)
+        data = np.loadtxt(log_file, skiprows=1)
         thresholds = data[:, 0]
         accuracies = data[:, 1]
         best_idx = np.argmax(accuracies)
-        return float(thresholds[best_idx])
+        # [thresh, acc, prec, rec, f1, far, frr]
+        values = data[best_idx]
+        return {
+            "threshold": float(values[0]),
+            "accuracy": float(values[1]),
+            "precision": float(values[2]),
+            "recall": float(values[3]),
+            "f1": float(values[4]),
+            "far": float(values[5]),
+            "frr": float(values[6]),
+        }
 
-    def _plot_results(self, log_path: Optional[str]) -> None:
-        if log_path is None or not os.path.exists(log_path):
+    def _plot_results_from_lines(self, log_lines: List[str], plot_file: str) -> None:
+        """
+        Plot results (accuracy, FAR, FRR) from in-memory log lines and save as PNG.
+
+        Args:
+            log_lines (List[str]): Lines in log format (first line is header, skip lines with '#').
+            plot_file (str): Where to save the plot.
+        """
+        data = [
+            [float(val) for val in line.strip().split()]
+            for line in log_lines
+            if not line.startswith("#") and not line.startswith("THRESH")
+        ]
+        data = np.array(data)
+        if data.size == 0:
             return
-        data = np.loadtxt(log_path, skiprows=1)
-        thresholds, accs, fars, frrs = data[:, 0], data[:, 1], data[:, 5], data[:, 6]
+        thresholds, accs, precs, recs, f1s, fars, frrs = data.T
 
         plt.figure(figsize=(8, 6))
         plt.plot(thresholds, accs, label="Accuracy")
@@ -233,7 +263,6 @@ class FaceBankCalibrator:
         plt.legend()
         plt.grid(True)
         plt.tight_layout()
-
-        outpath = os.path.join(os.path.dirname(log_path), "threshold_plot.png")
-        plt.savefig(outpath)
+        os.makedirs(os.path.dirname(plot_file), exist_ok=True)
+        plt.savefig(plot_file)
         plt.close()

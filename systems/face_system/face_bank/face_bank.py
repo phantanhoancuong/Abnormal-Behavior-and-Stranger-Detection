@@ -39,28 +39,30 @@ class FaceBank:
         self.load()
 
     def append(self, face_bank_dir: str) -> None:
-        """
-        Extract embeddings for each image in each subfolder and append to the face bank.
-
-        Args:
-            face_bank_dir: Directory structure {person_id}/{image files}.
-        """
         for person in sorted(os.listdir(face_bank_dir)):
             person_path = os.path.join(face_bank_dir, person)
             if not os.path.isdir(person_path):
                 continue
 
-            count = 0
+            image_paths = []
             for image_file in sorted(os.listdir(person_path)):
                 image_path = os.path.join(person_path, image_file)
-                image = cv2.imread(image_path)
-                if image is None:
-                    continue
+                image_paths.append(image_path)
 
-                detections = self.model.detect_align_extract(image)
+            # Read and store all images
+            images = [cv2.imread(path) for path in image_paths]
+            images = [img for img in images if img is not None]
+
+            if not images:
+                continue
+
+            # Use batch inference
+            detections_batch = self.model.detect_align_extract_batch(images)
+            count = 0
+
+            for detections in detections_batch:
                 if not detections:
                     continue
-
                 feature, _ = detections[0]
                 self.embeddings.append(feature.astype(np.float32))
                 self.labels.append(person)
@@ -90,7 +92,7 @@ class FaceBank:
 
         np.savez(
             self.bank_path,
-            embeddings=np.array(self.embeddings, dtype=np.float32),
+            embeddings=np.stack(self.embeddings, axis=0).astype(np.float32),
             labels=np.array(self.labels),
         )
         print(f"[INFO] Face bank saved to {self.bank_path}")
@@ -99,6 +101,11 @@ class FaceBank:
         """
         Load embeddings and labels from file and build a FAISS index for cosine similarity search.
         """
+        if not os.path.exists(self.bank_path):
+            raise FileNotFoundError(
+                f"[ERROR] Face bank file not found: {self.bank_path}"
+            )
+
         data = np.load(self.bank_path)
         self.embeddings = data["embeddings"].astype(np.float32)
         self.labels = data["labels"].tolist()
@@ -127,3 +134,9 @@ class FaceBank:
             return label, score
         else:
             return "stranger", score
+
+    def __len__(self) -> int:
+        return len(self.labels)
+
+    def __contains__(self, label: str) -> bool:
+        return label in self.labels

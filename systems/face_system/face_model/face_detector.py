@@ -16,9 +16,13 @@ class FaceDetector:
         iou_threshold: float = 0.5,
     ):
         """
+        Initialize the face detector.
+
         Args:
-            model_path: Path to the YOLO face detection model.
-            device: Device to run inference on ("cuda" or "cpu").
+            model_path (str): Path to the trained YOLO face detection model.
+            device (str): Inference device, e.g., "cuda" or "cpu".
+            det_threshold (float): Confidence threshold for filtering detections.
+            iou_threshold (float): IoU threshold for NMS during detection.
         """
         self.model = YOLO(model_path, verbose=False)
         self.device = device
@@ -26,17 +30,17 @@ class FaceDetector:
         self.iou_threshold = iou_threshold
 
     def detect(
-        self, frame: np.ndarray, conf: Optional[float] = None
+        self,
+        frame: np.ndarray,
+        conf: Optional[float] = None,
     ) -> List[Tuple[int, int, int, int]]:
         """
-        Detect faces in a frame.
+        Detect faces in a BGR frame.
 
         Args:
-            frame: Input image (BGR, as np.ndarray).
-            conf: Confidence threshold for keeping detections.
-
-        Returns:
-            List of bounding boxes (x1, y1, x2, y2) for detected faces.
+            frame (np.ndarray): The original image/frame in BGR.
+            conf (Optional[float]): Confidence threshold to filter detections.
+                If None, uses the detector's threshold.
         """
         conf = conf if conf is not None else self.det_threshold
         results = self.model.predict(

@@ -1,5 +1,6 @@
 from typing import List, Optional, Tuple
 import numpy as np
+import torch
 
 from systems.face_system.face_model.face_detector import FaceDetector
 from systems.face_system.face_model.face_aligner import FaceAligner
@@ -8,7 +9,7 @@ from systems.face_system.face_model.face_feature_extractor import FaceFeatureExt
 
 class FaceModel:
     """
-    Face model that handles face detection, alignment, and feature extraction.
+    Face system pipeline that handles face detection, alignment, and feature extraction.
     """
 
     def __init__(
@@ -24,18 +25,21 @@ class FaceModel:
         iou_threshold: float = 0.5,
     ):
         """
-        Initialize the face model with optional custom detector, aligner, and extractor.
+        Initialize the face pipeline.
 
         Args:
-            detector: Pre-initialized FaceDetector (optional).
-            detector_weights: Path to detector weights (required if detector is None).
-            aligner: Pre-initialized FaceAligner (optional).
-            extractor: Pre-initialized FaceFeatureExtractor (optional).
-            extractor_arch: Model architecture name for extractor (if not provided).
-            extractor_weights: Path to extractor weights (if not provided).
-            device: Device to run models on ('cuda' or 'cpu').
-            det_threshold: Default confidence threshold for detection.
-            iou_threshold: Default IoU threshold for tracking or matching.
+            detector (Optional[FaceDetector]): Pre-initialized FaceDetector instance (optional).
+            detector_weights (Optional[str]): Path to detector weights (required if detector is None).
+            aligner (Optional[FaceAligner]): Pre-initialized FaceAligner instance (optional).
+            extractor (Optional[FaceFeatureExtractor]): Pre-initialized FaceFeatureExtractor instance (optional).
+            extractor_arch (Optional[str]): Architecture name for extractor (required if extractor is None).
+            extractor_weights (Optional[str]): Path to extractor weights (required if extractor is None).
+            device (str): Device string ("cuda" or "cpu").
+            det_threshold (float): Confidence threshold for detection.
+            iou_threshold (float): IoU threshold for detection/postprocessing.
+
+        Raises:
+            ValueError: If required weights/architecture are missing for initialization.
         """
         self.device = device
         self.conf_threshold = det_threshold
@@ -70,14 +74,11 @@ class FaceModel:
         self, frame: np.ndarray, conf: Optional[float] = None
     ) -> List[Tuple[np.ndarray, np.ndarray]]:
         """
-        Detect faces, align them, and extract features from a single image.
+        Detect faces, align them, and extract feature embeddings from a single frame.
 
         Args:
-            frame: BGR image as numpy array.
-            conf: Detection confidence threshold. Uses default if None.
-
-        Returns:
-            List of (embedding, bounding_box) tuples.
+            frame (np.ndarray): The original image/frame in BGR.
+            conf (Optional[float]): Detection confidence threshold (optional).
         """
         conf = conf if conf is not None else self.conf_threshold
         boxes = self.detector.detect(frame, conf)
@@ -95,13 +96,37 @@ class FaceModel:
         self, frames: List[np.ndarray], conf: Optional[float] = None
     ) -> List[List[Tuple[np.ndarray, np.ndarray]]]:
         """
-        Apply detect_align_extract to each frame in a list individually (naive batching).
+        Detect faces, align them, and batch-extract features for all frames.
 
         Args:
-            frames: List of BGR images (numpy arrays).
-            conf: Detection confidence threshold. Uses default if None.
-
-        Returns:
-            List of results, one per frame. Each result is a list of (embedding, box) tuples.
+            frames (List[np.ndarray]): List of BGR images.
+            conf (Optional[float]): Detection confidence threshold.
         """
-        return [self.detect_align_extract(frame, conf) for frame in frames]
+        conf = conf if conf is not None else self.conf_threshold
+        all_aligned = []
+        all_boxes = []
+        frame_indices = []
+
+        for i, frame in enumerate(frame):
+            boxes = self.detector.detect(frame, conf)
+            for box in boxes:
+                aligned = self.aligner.align(frame, box)
+                if aligned is not None:
+                    preprocessed = self.extractor.preprocess(aligned)
+                    all_aligned.append(preprocessed)
+                    all_boxes.append(box)
+                    frame_indices.append(i)
+
+        if not all_aligned:
+            return [[] for _ in frames]
+
+        batch_tensor = (
+            torch.from_numpy(np.stack(all_aligned)).float().to(self.extractor.device)
+        )
+        features = self.extractor.forward(batch_tensor)
+
+        results = [[] for _ in frames]
+        for idx, (feature, box) in zip(frame_indices, zip(features, all_boxes)):
+            results[idx].append((feature, box))
+
+        return results
